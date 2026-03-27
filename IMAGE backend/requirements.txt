@@ -4,6 +4,5 @@ torch
 torchvision
 transformers
 pillow
-sqlite3
 python-jose
 openai
