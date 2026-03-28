@@ -8,21 +8,6 @@ from datetime import datetime
 from gtts import gTTS
 
 # -------------------------
-# SAFE IMPORTS
-# -------------------------
-try:
-    import cv2
-    CV2_AVAILABLE = True
-except:
-    CV2_AVAILABLE = False
-
-try:
-    from ultralytics import YOLO
-    YOLO_AVAILABLE = True
-except:
-    YOLO_AVAILABLE = False
-
-# -------------------------
 # CONFIG
 # -------------------------
 st.set_page_config(page_title="Image Recognition Pro+", layout="wide")
@@ -78,24 +63,16 @@ else:
         st.rerun()
 
     # -------------------------
-    # LOAD MODELS
+    # MODEL
     # -------------------------
     @st.cache_resource
-    def load_models():
+    def load_model():
         weights = models.MobileNet_V2_Weights.DEFAULT
-        clf = models.mobilenet_v2(weights=weights)
-        clf.eval()
+        model = models.mobilenet_v2(weights=weights)
+        model.eval()
+        return model, weights
 
-        yolo = None
-        if YOLO_AVAILABLE:
-            try:
-                yolo = YOLO("yolov8n.pt")
-            except:
-                yolo = None
-
-        return clf, weights, yolo
-
-    clf_model, weights, yolo_model = load_models()
+    model, weights = load_model()
     transform = weights.transforms()
     labels = weights.meta["categories"]
 
@@ -114,8 +91,8 @@ else:
         img = transform(image).unsqueeze(0)
 
         with torch.inference_mode():
-            out = clf_model(img)
-            probs = torch.nn.functional.softmax(out[0], dim=0)
+            outputs = model(img)
+            probs = torch.nn.functional.softmax(outputs[0], dim=0)
 
         top5 = torch.topk(probs, 5)
 
@@ -125,47 +102,21 @@ else:
             for i in range(5)
         ])
 
-    def detect(image):
-        if yolo_model is None:
-            return image, []
+    # 🔥 HUMAN + ANIMAL DETECTION (SMART FILTER)
+    def detect_animals_humans(df):
+        keywords = [
+            "person","man","woman","boy","girl",
+            "dog","cat","cow","horse","sheep","animal"
+        ]
 
-        img = np.array(image)
+        detected = []
+        for _, row in df.iterrows():
+            label = row["Label"].lower()
 
-        try:
-            results = yolo_model(img, conf=0.45)[0]
-        except:
-            return image, []
+            if any(k in label for k in keywords):
+                detected.append(label)
 
-        objects = []
-        important = ["person","dog","cat","cow","horse","sheep","bird"]
-
-        for box in results.boxes:
-            cls = int(box.cls[0])
-            label = yolo_model.names[cls]
-
-            if label in important:
-                objects.append(label)
-
-        annotated = results.plot()
-        return Image.fromarray(annotated), objects
-
-    def detect_faces(image):
-        if not CV2_AVAILABLE:
-            return image, 0
-
-        img = np.array(image)
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-        face_cascade = cv2.CascadeClassifier(
-            cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-        )
-
-        faces = face_cascade.detectMultiScale(gray, 1.3, 5)
-
-        for (x,y,w,h) in faces:
-            cv2.rectangle(img,(x,y),(x+w,y+h),(0,255,0),2)
-
-        return Image.fromarray(img), len(faces)
+        return list(set(detected))
 
     def explain(text):
         if language == "Telugu":
@@ -183,92 +134,76 @@ else:
     # -------------------------
     # TABS
     # -------------------------
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "🔍 Classification",
-        "🎯 Object Detection",
-        "🧠 Face Detection",
-        "📊 Analytics"
-    ])
+    tab1, tab2 = st.tabs(["🔍 Analyze", "📊 Analytics"])
 
     # -------------------------
-    # CLASSIFICATION
+    # TAB 1: ANALYSIS
     # -------------------------
     with tab1:
-        file = st.file_uploader("Upload Image", type=["jpg","png"])
+
+        file = st.file_uploader("Upload Image", type=["jpg","png","jpeg"])
 
         if file:
             image = Image.open(file)
 
-            st.image(image, use_container_width=True)
+            col1, col2 = st.columns(2)
 
-            df = classify(image)
-            pred = df.iloc[0]["Label"]
+            with col1:
+                st.image(image, use_container_width=True)
 
-            st.success(f"🎯 Predicted: {pred}")
-            st.dataframe(df)
+            with col2:
+                df = classify(image)
+                pred = df.iloc[0]["Label"]
 
-            st.session_state.history.append({
-                "time": datetime.now(),
-                "prediction": pred
-            })
+                st.success(f"🎯 Predicted: {pred}")
 
-    # -------------------------
-    # OBJECT DETECTION
-    # -------------------------
-    with tab2:
+                # 📊 Table
+                st.dataframe(df)
 
-        if yolo_model is None:
-            st.warning("⚠️ Object Detection not available in this environment")
+                # 📈 Chart
+                st.bar_chart(df.set_index("Label"))
 
-        file = st.file_uploader("Upload Image", type=["jpg","png"], key="det")
+                # 👨🐶 Detection
+                objects = detect_animals_humans(df)
 
-        if file:
-            image = Image.open(file)
+                if objects:
+                    st.success(f"👀 Detected: {objects}")
+                    explanation = explain(", ".join(objects))
+                else:
+                    st.warning("No humans/animals detected")
+                    explanation = explain(pred)
 
-            detected_img, objects = detect(image)
+                st.subheader("🧠 Explanation")
+                st.write(explanation)
 
-            st.image(detected_img, use_container_width=True)
-
-            if objects:
-                st.success(f"Detected: {set(objects)}")
-                text = ", ".join(set(objects))
-                st.write(explain(text))
-
+                # 🔊 Voice
                 if use_voice:
-                    audio = speak(text)
+                    audio = speak(explanation)
                     if audio:
                         st.audio(audio)
-            else:
-                st.warning("No humans/animals detected")
+
+                # 📊 Save history
+                st.session_state.history.append({
+                    "time": datetime.now(),
+                    "prediction": pred
+                })
 
     # -------------------------
-    # FACE DETECTION
+    # TAB 2: ANALYTICS
     # -------------------------
-    with tab3:
-
-        if not CV2_AVAILABLE:
-            st.warning("⚠️ Face detection not supported here")
-
-        file = st.file_uploader("Upload Image", type=["jpg","png"], key="face")
-
-        if file:
-            image = Image.open(file)
-
-            face_img, count = detect_faces(image)
-
-            st.image(face_img)
-            st.success(f"Faces detected: {count}")
-
-    # -------------------------
-    # ANALYTICS
-    # -------------------------
-    with tab4:
+    with tab2:
 
         st.metric("Total Predictions", len(st.session_state.history))
 
         if st.session_state.history:
             df = pd.DataFrame(st.session_state.history)
+
             st.bar_chart(df["prediction"].value_counts())
 
+            st.dataframe(df)
+
+            csv = df.to_csv(index=False)
+            st.download_button("Download CSV", csv)
+
     st.markdown("---")
-    st.markdown("🔥 Cloud Safe AI Project")
+    st.markdown("🔥 Cloud Ready AI Project")
