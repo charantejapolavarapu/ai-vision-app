@@ -12,13 +12,16 @@ from gtts import gTTS
 st.set_page_config(page_title="Image Recognition Pro", layout="wide")
 
 # -------------------------
-# SESSION LOGIN
+# SESSION STORAGE
 # -------------------------
 if "user" not in st.session_state:
     st.session_state.user = None
 
+if "users" not in st.session_state:
+    st.session_state.users = {}
+
 # -------------------------
-# CUSTOM UI (GLASS STYLE)
+# PREMIUM UI CSS
 # -------------------------
 st.markdown("""
 <style>
@@ -32,28 +35,45 @@ body {background-color: #0e1117;}
 }
 .title {
     text-align: center;
-    font-size: 40px;
+    font-size: 38px;
     font-weight: bold;
 }
 </style>
 """, unsafe_allow_html=True)
 
 # -------------------------
-# LOGIN PAGE
+# LOGIN / REGISTER
 # -------------------------
 if st.session_state.user is None:
-    st.markdown("<div class='title'>🔐 Login</div>", unsafe_allow_html=True)
 
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
+    st.markdown("<div class='title'>🔐 Image Recognition Login</div>", unsafe_allow_html=True)
 
-    if st.button("Login"):
-        if username and password:
-            st.session_state.user = username
-            st.success("Login successful")
-            st.rerun()
-        else:
-            st.error("Enter credentials")
+    tab1, tab2 = st.tabs(["Login", "Register"])
+
+    # LOGIN
+    with tab1:
+        l_user = st.text_input("Username", key="login_user")
+        l_pass = st.text_input("Password", type="password", key="login_pass")
+
+        if st.button("Login"):
+            if l_user in st.session_state.users and st.session_state.users[l_user] == l_pass:
+                st.session_state.user = l_user
+                st.success("Login successful")
+                st.rerun()
+            else:
+                st.error("Invalid credentials")
+
+    # REGISTER
+    with tab2:
+        r_user = st.text_input("New Username", key="reg_user")
+        r_pass = st.text_input("New Password", type="password", key="reg_pass")
+
+        if st.button("Register"):
+            if r_user and r_pass:
+                st.session_state.users[r_user] = r_pass
+                st.success("Registered successfully")
+            else:
+                st.error("Fill all fields")
 
 # -------------------------
 # MAIN APP
@@ -63,13 +83,12 @@ else:
     st.markdown(f"<div class='title'>🧠 Image Recognition Pro</div>", unsafe_allow_html=True)
     st.write(f"Welcome, **{st.session_state.user}** 👋")
 
-    # LOGOUT
     if st.button("Logout"):
         st.session_state.user = None
         st.rerun()
 
     # -------------------------
-    # MODEL
+    # MODEL LOAD
     # -------------------------
     @st.cache_resource
     def load_model():
@@ -82,14 +101,12 @@ else:
     transform = weights.transforms()
     labels = weights.meta["categories"]
 
-    history = []
-
     # -------------------------
     # SIDEBAR
     # -------------------------
-    st.sidebar.title("⚙️ Controls")
+    st.sidebar.title("⚙️ Settings")
     use_ai = st.sidebar.toggle("Enable AI Explanation")
-    use_voice = st.sidebar.toggle("Enable Voice")
+    use_voice = st.sidebar.toggle("Enable Voice Output")
 
     # -------------------------
     # OPENAI SAFE
@@ -101,13 +118,18 @@ else:
             api_key = os.getenv("OPENAI_API_KEY")
             if api_key:
                 client = OpenAI(api_key=api_key)
+            else:
+                st.sidebar.warning("No API key")
         except:
-            st.sidebar.warning("AI not available")
+            st.sidebar.warning("OpenAI not available")
 
     # -------------------------
     # FUNCTIONS
     # -------------------------
     def analyze(image):
+        # 🔥 FIXED BUG
+        image = image.convert("RGB")
+
         img = transform(image).unsqueeze(0)
 
         with torch.inference_mode():
@@ -132,11 +154,11 @@ else:
         try:
             res = client.chat.completions.create(
                 model="gpt-4o-mini",
-                messages=[{"role": "user", "content": f"Explain {label}"}]
+                messages=[{"role": "user", "content": f"Explain {label} in simple terms"}]
             )
             return res.choices[0].message.content
         except:
-            return "Error"
+            return "Error generating explanation"
 
     def text_to_speech(text):
         tts = gTTS(text)
@@ -145,7 +167,7 @@ else:
         return file
 
     # -------------------------
-    # UI LAYOUT
+    # UI
     # -------------------------
     st.markdown("### 📷 Upload Image")
     file = st.file_uploader("", type=["jpg", "png", "jpeg"])
@@ -171,14 +193,13 @@ else:
             st.subheader("📈 Chart")
             st.bar_chart(df.set_index("Label"))
 
-            # AI
             explanation = ""
+
             if use_ai:
                 explanation = get_explanation(df.iloc[0]["Label"])
                 st.subheader("🧠 AI Explanation")
                 st.write(explanation)
 
-            # Voice
             if use_voice and explanation:
                 audio = text_to_speech(explanation)
                 st.audio(audio)
@@ -188,14 +209,11 @@ else:
     # -------------------------
     # ANALYTICS
     # -------------------------
-    st.markdown("### 📊 Usage Analytics")
+    st.markdown("### 📊 Dashboard")
 
-    st.metric("Total Users", 1)
-    st.metric("Predictions Today", 5)
-    st.metric("Accuracy", "92%")
+    st.metric("Active User", st.session_state.user)
+    st.metric("Models Used", "MobileNetV2")
+    st.metric("Status", "Running ✅")
 
-    # -------------------------
-    # FOOTER
-    # -------------------------
     st.markdown("---")
-    st.markdown("🚀 Startup AI App | Built with Streamlit")
+    st.markdown("🚀 Built with Streamlit | AI Vision App")
