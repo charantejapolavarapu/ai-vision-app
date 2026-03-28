@@ -5,11 +5,12 @@ from PIL import Image
 import pandas as pd
 import os
 from gtts import gTTS
+from datetime import datetime
 
 # -------------------------
 # CONFIG
 # -------------------------
-st.set_page_config(page_title="Image Recognition Pro", layout="wide")
+st.set_page_config(page_title="Image Recognition Pro+", layout="wide")
 
 # -------------------------
 # SESSION
@@ -18,24 +19,25 @@ if "user" not in st.session_state:
     st.session_state.user = None
 if "users" not in st.session_state:
     st.session_state.users = {}
+if "history" not in st.session_state:
+    st.session_state.history = []
 
 # -------------------------
 # UI STYLE
 # -------------------------
 st.markdown("""
 <style>
-body {background-color: #0e1117;}
+body {background-color:#0e1117;}
 .card {
-    background: rgba(255,255,255,0.06);
+    background: rgba(255,255,255,0.05);
     padding: 20px;
     border-radius: 15px;
-    backdrop-filter: blur(12px);
     margin-bottom: 20px;
 }
 .title {
-    text-align: center;
-    font-size: 36px;
-    font-weight: bold;
+    text-align:center;
+    font-size:40px;
+    font-weight:bold;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -44,8 +46,7 @@ body {background-color: #0e1117;}
 # LOGIN
 # -------------------------
 if st.session_state.user is None:
-
-    st.markdown("<div class='title'>🔐 Image Recognition</div>", unsafe_allow_html=True)
+    st.markdown("<div class='title'>🔐 Login</div>", unsafe_allow_html=True)
 
     tab1, tab2 = st.tabs(["Login", "Register"])
 
@@ -57,33 +58,28 @@ if st.session_state.user is None:
                 st.session_state.user = u
                 st.rerun()
             else:
-                st.error("Invalid credentials")
+                st.error("Invalid")
 
     with tab2:
         u = st.text_input("New Username")
         p = st.text_input("New Password", type="password")
         if st.button("Register"):
-            if u and p:
-                st.session_state.users[u] = p
-                st.success("Registered")
-            else:
-                st.error("Fill all fields")
+            st.session_state.users[u] = p
+            st.success("Registered")
 
 # -------------------------
-# MAIN APP
+# MAIN
 # -------------------------
 else:
 
-    st.markdown("<div class='title'>🧠 Image Recognition Pro</div>", unsafe_allow_html=True)
-    st.write(f"Welcome **{st.session_state.user}** 👋")
+    st.markdown("<div class='title'>🚀 Image Recognition Pro+</div>", unsafe_allow_html=True)
+    st.write(f"Welcome **{st.session_state.user}**")
 
     if st.button("Logout"):
         st.session_state.user = None
         st.rerun()
 
-    # -------------------------
     # MODEL
-    # -------------------------
     @st.cache_resource
     def load_model():
         weights = models.MobileNet_V2_Weights.DEFAULT
@@ -95,31 +91,12 @@ else:
     transform = weights.transforms()
     labels = weights.meta["categories"]
 
-    # -------------------------
     # SIDEBAR
-    # -------------------------
-    st.sidebar.title("⚙️ Settings")
-    use_ai = st.sidebar.toggle("AI Explanation")
+    st.sidebar.title("⚙️ Options")
+    language = st.sidebar.selectbox("Language", ["English", "Telugu"])
     use_voice = st.sidebar.toggle("Voice")
 
-    language = st.sidebar.selectbox("Language", ["English", "Telugu"])
-
-    # -------------------------
-    # OPENAI SAFE
-    # -------------------------
-    client = None
-    if use_ai:
-        try:
-            from openai import OpenAI
-            key = os.getenv("OPENAI_API_KEY")
-            if key:
-                client = OpenAI(api_key=key)
-        except:
-            pass
-
-    # -------------------------
     # FUNCTIONS
-    # -------------------------
     def analyze(image):
         image = image.convert("RGB")
         img = transform(image).unsqueeze(0)
@@ -128,109 +105,105 @@ else:
             outputs = model(img)
             probs = torch.nn.functional.softmax(outputs[0], dim=0)
 
-        top3 = torch.topk(probs, 3)
+        top5 = torch.topk(probs, 5)
 
-        return pd.DataFrame([
-            {"Label": labels[top3.indices[i]],
-             "Confidence (%)": round(float(top3.values[i]) * 100, 2)}
-            for i in range(3)
-        ])
+        results = []
+        for i in range(5):
+            results.append({
+                "Label": labels[top5.indices[i]],
+                "Confidence": round(float(top5.values[i])*100,2)
+            })
 
-    # ✅ REAL TELUGU EXPLANATION
-    def get_explanation(label, lang):
+        return pd.DataFrame(results)
 
-        fallback_en = f"This image is predicted as {label} based on visual features like shape and texture."
-        fallback_te = f"ఈ చిత్రం {label} గా గుర్తించబడింది. ఆకారం మరియు రంగు వంటి లక్షణాల ఆధారంగా ఇది నిర్ణయించబడింది."
+    def explanation(label):
+        if language == "Telugu":
+            return f"ఈ చిత్రం {label} గా గుర్తించబడింది. ఇది ఆకారం మరియు రంగుల ఆధారంగా గుర్తించబడింది."
+        return f"This image is classified as {label} based on visual patterns."
 
-        if client is None:
-            return fallback_te if lang == "Telugu" else fallback_en
-
-        try:
-            if lang == "Telugu":
-                prompt = f"{label} అనే వస్తువు ఏమిటి మరియు ఈ చిత్రం ఎందుకు {label}గా గుర్తించబడిందో సులభంగా తెలుగులో వివరించండి."
-            else:
-                prompt = f"Explain why this image is {label} in simple terms."
-
-            res = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}]
-            )
-
-            return res.choices[0].message.content
-
-        except:
-            return fallback_te if lang == "Telugu" else fallback_en
-
-    def text_to_speech(text):
+    def speak(text):
         tts = gTTS(text, lang='te' if language=="Telugu" else 'en')
-        file = "voice.mp3"
-        tts.save(file)
-        return file
+        tts.save("voice.mp3")
+        return "voice.mp3"
+
+    # TABS
+    tab1, tab2, tab3 = st.tabs(["🔍 Analyze", "📊 Analytics", "🧾 History"])
 
     # -------------------------
-    # UI
+    # TAB 1: ANALYZE
     # -------------------------
-    st.markdown("### 📷 Upload Image")
-    file = st.file_uploader("", type=["jpg", "png", "jpeg"])
+    with tab1:
 
-    if file:
-        image = Image.open(file)
+        st.markdown("### Upload or Capture Image")
 
-        col1, col2 = st.columns(2)
+        file = st.file_uploader("Upload", type=["jpg","png"])
+        cam = st.camera_input("Or Take Photo")
 
-        with col1:
-            st.markdown("<div class='card'>", unsafe_allow_html=True)
-            st.image(image, use_container_width=True)
-            st.markdown("</div>", unsafe_allow_html=True)
+        if file or cam:
 
-        with col2:
-            df = analyze(image)
+            image = Image.open(file if file else cam)
 
-            predicted_label = df.iloc[0]["Label"]
+            col1, col2 = st.columns(2)
 
-            st.markdown("<div class='card'>", unsafe_allow_html=True)
+            with col1:
+                st.image(image, use_container_width=True)
 
-            # 🎯 PREDICTED VALUE
-            st.subheader("🎯 Predicted Value")
-            st.success(predicted_label)
+            with col2:
+                df = analyze(image)
+                pred = df.iloc[0]["Label"]
 
-            # 📊 FULL TABLE
-            st.subheader("📊 Predictions")
+                st.success(f"🎯 Predicted: {pred}")
+
+                # PROGRESS BARS
+                for i,row in df.iterrows():
+                    st.write(row["Label"])
+                    st.progress(int(row["Confidence"]))
+
+                st.dataframe(df)
+
+                exp = explanation(pred)
+                st.write("🧠", exp)
+
+                if use_voice:
+                    st.audio(speak(exp))
+
+                # SAVE HISTORY
+                st.session_state.history.append({
+                    "time": datetime.now(),
+                    "prediction": pred
+                })
+
+    # -------------------------
+    # TAB 2: ANALYTICS
+    # -------------------------
+    with tab2:
+
+        st.metric("Total Predictions", len(st.session_state.history))
+
+        if st.session_state.history:
+            df = pd.DataFrame(st.session_state.history)
+            st.bar_chart(df["prediction"].value_counts())
+
+    # -------------------------
+    # TAB 3: HISTORY
+    # -------------------------
+    with tab3:
+
+        if st.session_state.history:
+            df = pd.DataFrame(st.session_state.history)
+
+            search = st.text_input("Search")
+            if search:
+                df = df[df["prediction"].str.contains(search)]
+
             st.dataframe(df)
 
-            st.subheader("📈 Chart")
-            st.bar_chart(df.set_index("Label"))
+            # DOWNLOAD
+            csv = df.to_csv(index=False)
+            st.download_button("Download CSV", csv)
 
-            # 👤 USER INPUT ACTUAL VALUE
-            actual = st.text_input("Enter Actual Value (Optional)")
-
-            if actual:
-                st.subheader("🔁 Comparison")
-                if actual.lower() == predicted_label.lower():
-                    st.success("✅ Prediction Correct")
-                else:
-                    st.error("❌ Prediction Incorrect")
-
-            # 🧠 EXPLANATION
-            explanation = get_explanation(predicted_label, language)
-
-            st.subheader("🧠 Explanation")
-            st.write(explanation)
-
-            # 🔊 VOICE
-            if use_voice:
-                audio = text_to_speech(explanation)
-                st.audio(audio)
-
-            st.markdown("</div>", unsafe_allow_html=True)
-
-    # -------------------------
-    # DASHBOARD
-    # -------------------------
-    st.markdown("### 📊 Dashboard")
-    st.metric("User", st.session_state.user)
-    st.metric("Model", "MobileNetV2")
-    st.metric("Status", "Active")
+        else:
+            st.write("No history yet")
 
     st.markdown("---")
-    st.markdown("🚀 AI Vision App | Telugu Enabled")
+    st.markdown("🔥 Advanced AI Project")
