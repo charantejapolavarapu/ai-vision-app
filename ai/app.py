@@ -7,7 +7,7 @@ import os
 from gtts import gTTS
 
 # -------------------------
-# PAGE CONFIG
+# CONFIG
 # -------------------------
 st.set_page_config(page_title="Image Recognition Pro", layout="wide")
 
@@ -20,7 +20,7 @@ if "users" not in st.session_state:
     st.session_state.users = {}
 
 # -------------------------
-# PREMIUM UI
+# UI STYLE
 # -------------------------
 st.markdown("""
 <style>
@@ -34,14 +34,14 @@ body {background-color: #0e1117;}
 }
 .title {
     text-align: center;
-    font-size: 38px;
+    font-size: 36px;
     font-weight: bold;
 }
 </style>
 """, unsafe_allow_html=True)
 
 # -------------------------
-# LOGIN / REGISTER
+# LOGIN
 # -------------------------
 if st.session_state.user is None:
 
@@ -55,7 +55,6 @@ if st.session_state.user is None:
         if st.button("Login"):
             if u in st.session_state.users and st.session_state.users[u] == p:
                 st.session_state.user = u
-                st.success("Login successful")
                 st.rerun()
             else:
                 st.error("Invalid credentials")
@@ -101,12 +100,9 @@ else:
     # -------------------------
     st.sidebar.title("⚙️ Settings")
     use_ai = st.sidebar.toggle("AI Explanation")
-    use_voice = st.sidebar.toggle("Voice Output")
+    use_voice = st.sidebar.toggle("Voice")
 
-    language = st.sidebar.selectbox(
-        "🌍 Language",
-        ["English", "Hindi", "Telugu", "Tamil"]
-    )
+    language = st.sidebar.selectbox("Language", ["English", "Telugu"])
 
     # -------------------------
     # OPENAI SAFE
@@ -140,37 +136,33 @@ else:
             for i in range(3)
         ])
 
-    # SAFE EXPLANATION
-    def get_explanation(label):
-        # fallback (always works)
-        base = f"This image is predicted as {label} based on visual patterns like shape, color, and texture."
+    # ✅ REAL TELUGU EXPLANATION
+    def get_explanation(label, lang):
+
+        fallback_en = f"This image is predicted as {label} based on visual features like shape and texture."
+        fallback_te = f"ఈ చిత్రం {label} గా గుర్తించబడింది. ఆకారం మరియు రంగు వంటి లక్షణాల ఆధారంగా ఇది నిర్ణయించబడింది."
 
         if client is None:
-            return base
+            return fallback_te if lang == "Telugu" else fallback_en
 
         try:
+            if lang == "Telugu":
+                prompt = f"{label} అనే వస్తువు ఏమిటి మరియు ఈ చిత్రం ఎందుకు {label}గా గుర్తించబడిందో సులభంగా తెలుగులో వివరించండి."
+            else:
+                prompt = f"Explain why this image is {label} in simple terms."
+
             res = client.chat.completions.create(
                 model="gpt-4o-mini",
-                messages=[{
-                    "role": "user",
-                    "content": f"Explain {label} in simple terms"
-                }]
+                messages=[{"role": "user", "content": prompt}]
             )
-            return res.choices[0].message.content
-        except:
-            return base
 
-    # MULTI-LANGUAGE
-    def translate_text(text, lang):
-        translations = {
-            "Hindi": f"(हिंदी) {text}",
-            "Telugu": f"(తెలుగు) {text}",
-            "Tamil": f"(தமிழ்) {text}"
-        }
-        return translations.get(lang, text)
+            return res.choices[0].message.content
+
+        except:
+            return fallback_te if lang == "Telugu" else fallback_en
 
     def text_to_speech(text):
-        tts = gTTS(text)
+        tts = gTTS(text, lang='te' if language=="Telugu" else 'en')
         file = "voice.mp3"
         tts.save(file)
         return file
@@ -194,20 +186,38 @@ else:
         with col2:
             df = analyze(image)
 
+            predicted_label = df.iloc[0]["Label"]
+
             st.markdown("<div class='card'>", unsafe_allow_html=True)
 
+            # 🎯 PREDICTED VALUE
+            st.subheader("🎯 Predicted Value")
+            st.success(predicted_label)
+
+            # 📊 FULL TABLE
             st.subheader("📊 Predictions")
             st.dataframe(df)
 
             st.subheader("📈 Chart")
             st.bar_chart(df.set_index("Label"))
 
-            explanation = get_explanation(df.iloc[0]["Label"])
-            explanation = translate_text(explanation, language)
+            # 👤 USER INPUT ACTUAL VALUE
+            actual = st.text_input("Enter Actual Value (Optional)")
+
+            if actual:
+                st.subheader("🔁 Comparison")
+                if actual.lower() == predicted_label.lower():
+                    st.success("✅ Prediction Correct")
+                else:
+                    st.error("❌ Prediction Incorrect")
+
+            # 🧠 EXPLANATION
+            explanation = get_explanation(predicted_label, language)
 
             st.subheader("🧠 Explanation")
             st.write(explanation)
 
+            # 🔊 VOICE
             if use_voice:
                 audio = text_to_speech(explanation)
                 st.audio(audio)
@@ -223,4 +233,4 @@ else:
     st.metric("Status", "Active")
 
     st.markdown("---")
-    st.markdown("🚀 AI Vision App | Multi-language Enabled")
+    st.markdown("🚀 AI Vision App | Telugu Enabled")
